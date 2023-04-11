@@ -2,3 +2,7 @@ name = "ClimaEarth"
 uuid = "906757b5-891b-4e8e-8bc9-a9385723c9c8"
 authors = ["Gregory Wagner <wagner.greg@gmail.com>"]
 version = "0.1.0"
+
+[deps]
+Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"
+Glob = "c27321d9-0574-5035-807b-f59d2c89b15c"
