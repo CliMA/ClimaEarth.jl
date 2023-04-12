@@ -1,7 +1,7 @@
 using Adapt
 using Dates: AbstractTime, DateTime, Nanosecond, Millisecond
 
-using .Utils: prettytime
+using ..Utils: prettytime
 
 import Base: show
 

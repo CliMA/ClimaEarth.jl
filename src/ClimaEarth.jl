@@ -13,5 +13,7 @@ include("Utils.jl")
 include("Schedules.jl")
 include("Simulations/Simulations.jl")
 
+using .Simulations: Simulation
+
 end # module ClimaEarth
 

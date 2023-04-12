@@ -19,8 +19,6 @@ using Oceananigans.Advection: cell_advection_timescale
 using Oceananigans: AbstractDiagnostic, AbstractOutputWriter, fields
 =#
 
-using OrderedCollections: OrderedDict
-
 import Base: show
 
 function update_state! end

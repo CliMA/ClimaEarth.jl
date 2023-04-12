@@ -1,19 +1,13 @@
-using Oceananigans: prognostic_fields
-import Oceananigans.Utils: prettytime
-import Oceananigans.TimeSteppers: reset!
+using OrderedCollections: OrderedDict
 
-# It's not a model --- its a simulation!
-
-default_progress(simulation) = nothing
-
-mutable struct Simulation{ML, DT, ST, OW, CB}
+mutable struct Simulation{ML, DT, CL}
     model :: ML
     clock :: CL
     time_step :: DT
+    stop_time :: DT
     stop_iteration :: Float64
-    stop_time :: ST
     wall_time_limit :: Float64
-    callbacks :: CB
+    callbacks :: OrderedDict{Symbol, Callback}
     run_wall_time :: Float64
     running :: Bool
     initialized :: Bool
@@ -27,7 +21,7 @@ end
                stop_time = Inf,
                wall_time_limit = Inf)
 
-Construct a `Simulation` for a `model` with time step `Δt`.
+Construct a `Simulation` for a `model` with `time_step`.
 
 Keyword arguments
 =================
@@ -59,18 +53,11 @@ function Simulation(model; time_step,
    callbacks[:stop_iteration_exceeded] = Callback(stop_iteration_exceeded)
    callbacks[:wall_time_limit_exceeded] = Callback(wall_time_limit_exceeded)
 
-   # Convert numbers to floating point; otherwise preserve type (eg for DateTime types)
-   FT = eltype(model.grid)
-   Δt = Δt isa Number ? FT(Δt) : Δt
-   stop_time = stop_time isa Number ? FT(stop_time) : stop_time
-
    return Simulation(model,
                      time_step,
-                     Float64(stop_iteration),
                      stop_time,
+                     Float64(stop_iteration),
                      Float64(wall_time_limit),
-                     diagnostics,
-                     output_writers,
                      callbacks,
                      0.0,
                      false,

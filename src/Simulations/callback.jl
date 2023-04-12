@@ -1,4 +1,4 @@
-using .Utils: prettysummary
+using ..Utils: prettysummary
 
 import ClimaEarth: initialize!
 

@@ -107,6 +107,9 @@ function run!(sim; pickup=false)
     return nothing
 end
 
+struct TendencyCallsite end
+struct UpdateStateCallsite end
+
 const ModelCallsite = Union{TendencyCallsite, UpdateStateCallsite}
 
 """ Step `sim`ulation forward by one time step. """
@@ -156,12 +159,6 @@ end
 #####
 ##### Simulation initialization
 #####
-
-add_dependency!(diagnostics, output) = nothing # fallback
-add_dependency!(diags, wta::WindowedTimeAverage) = wta ∈ values(diags) || push!(diags, wta)
-
-add_dependencies!(diags, writer) = [add_dependency!(diags, out) for out in values(writer.outputs)]
-add_dependencies!(sim, ::Checkpointer) = nothing # Checkpointer does not have "outputs"
 
 we_want_to_pickup(pickup::Bool) = pickup
 we_want_to_pickup(pickup::Integer) = true
