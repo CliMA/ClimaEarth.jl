@@ -1,0 +1,16 @@
+    config: "column"
+    surface_setup: "DefaultMoninObukhov"
+    z_elem: 100
+    z_max: 30000.0
+    moist: "nonequil"
+    dt_save_to_sol: "Inf"
+    precip_model: "1M"
+    vert_diff: "FriersonDiffusion"
+    implicit_diffusion: true
+    config_file: single_column_precipitation_test.yml
+    toml: [toml/single_column_precipitation_test.toml]
+    t_end: "10days"
+    z_elem: 100
+    dt_save_to_sol: "Inf"
+    dt: "15secs"
+    hyperdiff": nothing
