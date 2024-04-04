@@ -36,7 +36,12 @@ function SingleColumnAtmosOceanModel(atmos, ocean)
         surface_fluxes = ℂᴶ,
     )
 
-    return SingleColumnAtmosOceanModel(clock, grid, atmos, ocean, surface, parameters)
+    return SingleColumnAtmosOceanModel(clock,
+                                       grid,
+                                       atmos,
+                                       ocean,
+                                       surface,
+                                       parameters)
 end
 
 """
@@ -147,21 +152,31 @@ function time_step!(scm::SingleColumnAtmosOceanModel, Δt)
     Qc = turbulent_fluxes.sensible_heat
     ΣQ = Qv + Qc
 
-    @. ρτ = vector_flux(ρτxz, ρτyz, 𝒢)
-    @. ρwq = scalar_flux(F, 𝒢)
-    @. ρwh = scalar_flux(ΣQ, 𝒢)
+    @. ρτ = tensor_from_components(ρτxz, ρτyz, 𝒢)
+    @. ρwq = vector_from_component(F, 𝒢)
+    @. ρwh = vector_from_component(ΣQ, 𝒢)
     
-    # 3. Set radiative fluxes in ocean
-    # 4. Update surface state in atmos
+    # 3. Set turbulent fluxes in ocean
+    JT = ocean.model.tracers.T.boundary_conditions.top
+    JS = ocean.model.tracers.S.boundary_conditions.top
+    τx = ocean.model.velocities.u.boundary_conditions.top
+    τy = ocean.model.velocities.v.boundary_conditions.top
+
+    # Need ρₐ, ρₒ, cₚ ocean, precipitation?
+
+    #
+    # 4. Set radiative fluxes in ocean
+    #
+    # 5. Update surface state in atmos
     radiation = atmos.integrator.p.radiation.radiation_model
     radiation.surface_temperature .= T₀
     radiation.direct_sw_surface_albedo .= 0.03
     radiation.diffuse_sw_surface_albedo .= 0.03
 
-    # Step forward atmos
+    # 6. Step forward atmos
     # step!(scm.atmos, Δt, true)
     #
-    # Step forward ocean
+    # 7. Step forward ocean
     # ocean.Δt = Δt
     # time_step!(scm.ocean)
 

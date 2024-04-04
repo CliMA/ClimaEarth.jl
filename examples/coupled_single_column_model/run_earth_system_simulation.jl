@@ -21,6 +21,10 @@ Uʰ.components.data.:2 .= 0 # set v = 0
 Ûʰ .= Covariant12Vector.(Uʰ)
 
 scm = SingleColumnAtmosOceanModel(atmos, ocean)
+# esm = EarthSystemModel(atmos, ocean, land, sea_ice)
+
+# simulation = Simulation(scm, Δt=1minute)
+# run!(simulation)
 
 time_step!(scm, 60)
 
