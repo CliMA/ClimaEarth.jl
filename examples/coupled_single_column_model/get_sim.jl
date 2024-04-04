@@ -1,4 +1,35 @@
-function get_simulation(config::AtmosConfig)
+#=
+# Making the spaces:
+
+@warn "perturb_initstate flag is ignored for single column configuration"
+FT = eltype(params)
+Δx = FT(1) # Note: This value shouldn't matter, since we only have 1 column.
+quad = Quadratures.GL{1}()
+horizontal_mesh = periodic_rectangle_mesh(;
+    x_max = Δx,
+    y_max = Δx,
+    x_elem = 1,
+    y_elem = 1,
+)
+if bubble
+    @warn "Bubble correction not compatible with single column configuration. It will be switched off."
+    bubble = false
+end
+h_space =
+    make_horizontal_space(horizontal_mesh, quad, comms_ctx, bubble)
+z_stretch = if parsed_args["z_stretch"]
+    Meshes.GeneralizedExponentialStretching(dz_bottom, dz_top)
+else
+    Meshes.Uniform()
+end
+make_hybrid_spaces(h_space, z_max, z_elem, z_stretch; parsed_args)
+=#
+
+
+function AtmosSimulation(spaces,
+                         config::AtmosConfig;
+                         stretching)
+
     params = create_parameter_set(config)
     atmos = get_atmos(config, params)
 
@@ -20,9 +51,12 @@ function get_simulation(config::AtmosConfig)
         end
         @info "Allocating Y: $s"
     else
-        spaces = get_spaces(config.parsed_args, params, config.comms_ctx)
+        spaces = get_spaces(config.parsed_args,
+                            params,             # clima params stuff
+                            config.comms_ctx)
     end
 
+    
     initial_condition = get_initial_condition(config.parsed_args)
     surface_setup = get_surface_setup(config.parsed_args)
 
