@@ -26,4 +26,6 @@ Manifest.toml
 *.jld2
 *.nc
 *.swp
+*.swo
+*.txt
 *output/

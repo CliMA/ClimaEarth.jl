@@ -35,12 +35,13 @@ using ClimaParams
 using Thermodynamics
 
 # For regridding:
-using ClimaUtilites
+using ClimaUtilities
 using Interpolations
-AtmosInterpolations = Base.get_extension(ClimaUtilities, :ClimaUtilitiesClimaCoreInterpolationsExt)
 
+AtmosInterpolations = Base.get_extension(ClimaUtilities, :ClimaUtilitiesClimaCoreInterpolationsExt)
 atmos = CA.get_simulation(CA.AtmosConfig("simple_atmos_simulation.yml"))
 
+#=
 time_step!(atmos::CA.AtmosSimulation) = CA.SciMLBase.step!(atmos.integrator)
 
 # time step
@@ -73,7 +74,7 @@ regridder = ClimaUtilities.Regridders.InterpolationsRegridder(space2)
 
 Q = Field{Center, Center, Nothing}(grid)
 
-# Need a logically Cartesian grid (keep Float32?)
+# Interpolate to intermediate Oceananigans grid
 intermediate_grid = LatitudeLongitudeGrid(Float32,
                                           size=(360, 180),
                                           longitude=(0, 360),
@@ -84,7 +85,18 @@ Qi = Field{Center, Center, Nothing}(intermediate_grid)
 λi = λnodes(intermediate_grid, Center(), Center(), Center())
 φi = φnodes(intermediate_grid, Center(), Center(), Center())
 Oceananigans.Fields.interpolate!(Qi, Q)
-ClimaUtilities.Regridders.regrid(regridder, interior(Qi, :, :, 1), (λi, φi))
+
+# Regrid to ClimaCore grid
+using ClimaCore.Utilities: half
+Qa = ClimaUtilities.Regridders.regrid(regridder, interior(Qint, :, :, 1), (λi, φi))
+
+# Project onto a vector!
+# :eyes https://github.com/CliMA/ClimaEarth.jl/pull/5/files
+c = atmos.integrator.p.scratch.ᶠtemp_scalar
+𝒢 = ClimaCore.Fields.level(ClimaCore.Fields.local_geometry_field(c), half)
+ρwh = atmos.integrator.p.precomputed.sfc_conditions.ρ_flux_h_tot
+@. ρwh = CA.SurfaceConditions.vector_from_component(Qa, 𝒢)
+@. ρτ = CA.SurfaceConditions.tensor_from_components(ρτxz, ρτyz, 𝒢)
 
 #=
 dict = z_max: 60000.0
@@ -102,4 +114,5 @@ vert_diff: "DecayWithHeightDiffusion"
 precip_model: "0M"
 cloud_model: "grid_scale"
 toml: [sphere_aquaplanet.toml]
+=#
 =#

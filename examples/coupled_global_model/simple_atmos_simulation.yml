@@ -8,7 +8,7 @@ rayleigh_sponge: true
 implicit_diffusion: true
 approximate_linear_solve_iters: 2
 moist: "equil"
-surface_setup: "DefaultMoninObukhov"
+surface_setup: "PrescribedSurface" #DefaultMoninObukhov"
 vert_diff: "DecayWithHeightDiffusion"
 precip_model: "0M"
 cloud_model: "grid_scale"
