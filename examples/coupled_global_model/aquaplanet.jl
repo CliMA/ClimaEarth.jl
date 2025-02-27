@@ -1,11 +1,8 @@
 import ClimaOcean as Ocean
 import ClimaAtmos as Atmos
 import Oceananigans
-import OrthogonalSphericalShellGrids
 
 using ClimaEarth
-using Oceananigans
-using Oceananigans.TurbulenceClosures: CATKEVerticalDiffusivity
 using Printf
 using GLMakie
 
@@ -15,7 +12,7 @@ using GLMakie
 
 atmosphere_configuration = Atmos.AtmosConfig("simple_atmos_simulation.yml")
 atmosphere = Atmos.get_simulation(atmosphere_configuration)
-Δt = atmosphere.integrator.dt # determined in yml file?
+Δt = atmosphere.integrator.dt # set in yml file
 
 ####
 #### A near-global ocean
@@ -48,7 +45,7 @@ ocean = Ocean.ocean_simulation(grid; momentum_advection, tracer_advection,
 Tatm(λ, φ, z=0) = 30 * cosd(φ)
 Tᵢ(λ, φ, z) = 30 * (1 - tanh((abs(φ) - 40) / 5)) / 2 + rand()
 Sᵢ(λ, φ, z) = 30 - 5e-3 * z + rand()
-set!(ocean.model, T=Tᵢ, S=Sᵢ)
+Oceananigans.set!(ocean.model, T=Tᵢ, S=Sᵢ)
 
 # Ocean.set!(ocean.model, T=Ocean.ECCOMetadata(:temperature),
 #                         S=Ocean.ECCOMetadata(:salinity))
@@ -103,18 +100,19 @@ function progress(sim)
     return nothing
 end
 
-add_callback!(simulation, progress, IterationInterval(10))
+Oceananigans.add_callback!(simulation, progress, Oceananigans.IterationInterval(10))
 
+using Oceananigans: ∂x, ∂y
 uo, vo, wo = ocean.model.velocities
 T = ocean.model.tracers.T
 S = ocean.model.tracers.S
 ζ = ∂x(vo) - ∂y(uo)
 outputs = (; uo, vo, wo, ζ, T, S)
-surface_writer = JLD2OutputWriter(ocean.model, outputs,
-                                  schedule = IterationInterval(10),
-                                  filename = "aquaplanet_ocean.jld2",
-                                  indices = (:, :, 30),
-                                  overwrite_existing = true)  
+surface_writer = Oceananigans.JLD2OutputWriter(ocean.model, outputs,
+                                               schedule = IterationInterval(10),
+                                               filename = "aquaplanet_ocean.jld2",
+                                               indices = (:, :, 30),
+                                               overwrite_existing = true)  
 simulation.output_writers[:ocean] = surface_writer
 
 run!(simulation)
