@@ -103,8 +103,8 @@ Oceananigans.set!(ocean.model, T=Tᵢ, S=Sᵢ)
 radiation  = Ocean.Radiation(ocean_albedo=0.03)
 sea_ice    = Ocean.FreezingLimitedOceanTemperature()
 model      = Ocean.OceanSeaIceModel(ocean, sea_ice; atmosphere, radiation)
-#simulation = Ocean.Simulation(model; Δt, stop_time=360 * Oceananigans.Units.days)
-simulation = Ocean.Simulation(model; Δt, stop_iteration=100)
+simulation = Ocean.Simulation(model; Δt, stop_time=60 * Oceananigans.Units.days)
+#simulation = Ocean.Simulation(model; Δt, stop_iteration=100)
 
 #####
 ##### Set up some callbaks + diagnostics and run the simulation
