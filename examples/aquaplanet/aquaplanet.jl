@@ -27,8 +27,10 @@ using LoggingExtras
 
 output_prefix = "aquaplanet"
 
+# Config docs:
+# https://clima.github.io/ClimaAtmos.jl/dev/config/
 config_dict = Dict(
-    "device" => "CUDADevice",
+    "device" => "auto", #"CUDADevice",
     "z_max" => 60000.0,
     "z_elem" => 31,
     "h_elem" => 6, # h_elem = 30 => ~ 1 degree
