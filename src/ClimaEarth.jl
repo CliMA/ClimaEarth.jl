@@ -1,5 +1,8 @@
 module ClimaEarth
 
+using OffsetArrays
+using KernelAbstractions
+
 import ClimaAtmos as CA
 import ClimaOcean as CO
 import Oceananigans as OC
@@ -71,21 +74,28 @@ function interpolate_atmosphere_state!(interfaces,
     exchange_atmosphere_state = interfaces.exchanger.exchange_atmosphere_state
     grid = exchange_atmosphere_state.u.grid
 
-    λ = λnodes(grid, Center(), Center(), Center())
-    φ = φnodes(grid, Center(), Center(), Center())
-
-    Nx, Ny, Nz = size(grid)
+    λ = λnodes(grid, Center(), Center(), Center(), with_halos=true)
+    φ = φnodes(grid, Center(), Center(), Center(), with_halos=true)
 
     if grid isa LatitudeLongitudeGrid
-        λ = reshape(λ, Nx, 1)
-        φ = reshape(φ, 1, Ny)
+        # Note that we have to include halos here, or fill_halo_regions! later.
+        Nx, Ny, Nz = size(grid)
+        λ = λ[0:Nx+1]
+        φ = φ[0:Ny+1]
+        λ = reshape(λ, Nx+2, 1)
+        φ = reshape(φ, 1, Ny+2)
     end
 
-    hcoords = @. CC.Geometry.LatLongPoint(φ, λ)
+    # Relevant code for moving interpolation into a kernel:
+    #
+    # https://github.com/CliMA/ClimaCore.jl/ \
+    #   blob/7624132c30836365a1be76865d19c7722070b98d/ext/cuda/remapping_interpolate_array.jl#L121
+    #
+    Xh = @. CC.Geometry.LatLongPoint(φ, λ)
 
     uah = CC.Geometry.UVVector.(CC.Spaces.level(atmosphere.integrator.u.c.uₕ, 1))
-    ui = CC.Remapping.interpolate(uah.components.data.:1, hcoords, nothing)
-    vi = CC.Remapping.interpolate(uah.components.data.:2, hcoords, nothing)
+    ui = CC.Remapping.interpolate(uah.components.data.:1, Xh, nothing)
+    vi = CC.Remapping.interpolate(uah.components.data.:2, Xh, nothing)
 
     # T, q, p from thermodynamic state ts?
     tsa = CC.Spaces.level(atmosphere.integrator.p.precomputed.ᶜts, 1)
@@ -94,21 +104,68 @@ function interpolate_atmosphere_state!(interfaces,
     pa = Thermodynamics.air_pressure.(ℂa, tsa)
     qa = Thermodynamics.total_specific_humidity.(ℂa, tsa)
 
-    Ti = CC.Remapping.interpolate(Ta, hcoords, nothing)
-    pi = CC.Remapping.interpolate(pa, hcoords, nothing)
-    qi = CC.Remapping.interpolate(qa, hcoords, nothing)
+    Ti = CC.Remapping.interpolate(Ta, Xh, nothing)
+    pi = CC.Remapping.interpolate(pa, Xh, nothing)
+    qi = CC.Remapping.interpolate(qa, Xh, nothing)
 
-    # interior(exchange_atmosphere_state.u, :, :, 1) ?
-    # or write a kernel and set them all.
-    exchange_atmosphere_state.u  .= ui
-    exchange_atmosphere_state.v  .= vi
-    exchange_atmosphere_state.T  .= Ti
-    exchange_atmosphere_state.q  .= qi
-    exchange_atmosphere_state.p  .= pi
-    exchange_atmosphere_state.Qs .= 0
-    exchange_atmosphere_state.Qℓ .= 0
+    ui = OffsetArray(ui, -1, -1)
+    vi = OffsetArray(vi, -1, -1)
+    Ti = OffsetArray(Ti, -1, -1)
+    qi = OffsetArray(qi, -1, -1)
+    pi = OffsetArray(pi, -1, -1)
+
+    #=
+    ui = on_architecture(arch, ui)
+    vi = on_architecture(arch, vi)
+    Ti = on_architecture(arch, Ti)
+    qi = on_architecture(arch, qi)
+    pi = on_architecture(arch, pi)
+    
+    kp = CO.OceanSeaIceModels.InterfaceComputations.interface_kernel_parameters(grid)
+    arch = OC.architecture(grid)
+    atmos_state = (u=ui, v=vi, T=Ti, q=qi, p=pi)
+    OC.Utils.launch!(arch, grid, kp,
+                     _interpolate_atmosphere_state!,
+                     exchange_atmosphere_state,
+                     atmos_state)
+    =#
+
+    ue  = view(exchange_atmosphere_state.u.data,  0:Nx+1, 0:Ny+1, 1)
+    ve  = view(exchange_atmosphere_state.v.data,  0:Nx+1, 0:Ny+1, 1)
+    Te  = view(exchange_atmosphere_state.T.data,  0:Nx+1, 0:Ny+1, 1)
+    qe  = view(exchange_atmosphere_state.q.data,  0:Nx+1, 0:Ny+1, 1)
+    pe  = view(exchange_atmosphere_state.p.data,  0:Nx+1, 0:Ny+1, 1)
+    Qse = view(exchange_atmosphere_state.Qs.data, 0:Nx+1, 0:Ny+1, 1)
+    Qℓe = view(exchange_atmosphere_state.Qℓ.data, 0:Nx+1, 0:Ny+1, 1)
+
+    copyto!(ue, ui)
+    copyto!(ve, vi)
+    copyto!(Te, Ti)
+    copyto!(qe, qi)
+    copyto!(pe, pi)
+
+    #=
+    # This is needed, unless the above computations include the halos.
+    # OC.fill_halo_regions!(exchange_atmosphere_state.u)
+    # OC.fill_halo_regions!(exchange_atmosphere_state.v)
+    # OC.fill_halo_regions!(exchange_atmosphere_state.T)
+    # OC.fill_halo_regions!(exchange_atmosphere_state.q)
+    # OC.fill_halo_regions!(exchange_atmosphere_state.p)
+    =#
 
     return nothing
+end
+
+# Note: this just copies, for now.
+@kernel function _interpolate_atmosphere_state!(exchange_state, atmos_state)
+    i, j = @index(Global, NTuple)
+    @inbounds begin
+        exchange_state.u[i, j, 1] = atmos_state.u[i, j]
+        exchange_state.v[i, j, 1] = atmos_state.v[i, j]
+        exchange_state.T[i, j, 1] = atmos_state.T[i, j]
+        exchange_state.q[i, j, 1] = atmos_state.q[i, j]
+        exchange_state.p[i, j, 1] = atmos_state.p[i, j]
+    end
 end
 
 atmosphere_exchanger(atmosphere::CA.AtmosSimulation, exchange_grid) = nothing
@@ -167,11 +224,12 @@ function compute_net_atmopshere_fluxes!(coupled_model::ClimaCoupledModel)
     c = atmos.integrator.p.scratch.ᶠtemp_scalar
     𝒢 = ClimaCore.Fields.level(ClimaCore.Fields.local_geometry_field(c), half)
     ρwh = atmos.integrator.p.precomputed.sfc_conditions.ρ_flux_h_tot
-    @. ρwh = CA.SurfaceConditions.vector_from_component(Qv, 𝒢) + CA.SurfaceConditions.vector_from_component(Qc, 𝒢)
+    @. ρwh = CA.SurfaceConditions.vector_from_component(Qv, 𝒢) +
+             CA.SurfaceConditions.vector_from_component(Qc, 𝒢)
 
     # Mass or volume flux: check units
-    # ρwq = atmos.integrator.p.precomputed.sfc_conditions.ρ_flux_q_tot
-    # @. ρwq = CA.SurfaceConditions.vector_from_component(Fv, 𝒢)
+    ρwq = atmos.integrator.p.precomputed.sfc_conditions.ρ_flux_q_tot
+    @. ρwq = CA.SurfaceConditions.vector_from_component(Fv, 𝒢)
     
     # TODO: validate this?
     ρτ = atmosphere.integrator.p.precomputed.sfc_conditions.ρ_flux_uₕ  

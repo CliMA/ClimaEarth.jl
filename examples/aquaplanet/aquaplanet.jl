@@ -36,7 +36,7 @@ config_dict = Dict(
     "h_elem" => 6, # h_elem = 30 => ~ 1 degree
     "dz_bottom" => 50.0,
     #"dt" => "100secs",
-    "dt" => "0.00001secs",
+    "dt" => "400secs",
     "topography" => "NoWarp", # "Earth"
     "rayleigh_sponge" => true,
     "implicit_diffusion" => true,
@@ -104,7 +104,7 @@ radiation  = Ocean.Radiation(ocean_albedo=0.03)
 sea_ice    = Ocean.FreezingLimitedOceanTemperature()
 model      = Ocean.OceanSeaIceModel(ocean, sea_ice; atmosphere, radiation)
 #simulation = Ocean.Simulation(model; Δt, stop_time=360 * Oceananigans.Units.days)
-simulation = Ocean.Simulation(model; Δt, stop_iteration=10)
+simulation = Ocean.Simulation(model; Δt, stop_iteration=100)
 
 #####
 ##### Set up some callbaks + diagnostics and run the simulation
@@ -144,21 +144,26 @@ function progress(sim)
     max_ρτxo = maximum(abs, ρτx)
     max_ρτyo = maximum(abs, ρτy)
     max_ΣQ = maximum(abs, ΣQ)
+    max_Qc = maximum(abs, Qc)
+    max_Qv = maximum(abs, Qv)
 
     elapsed = 1e-9 * (time_ns() - wallclock[])
     sdpd = sim.Δt / elapsed
 
-    msg = @sprintf("Iter: %d, time: %s, SDPD: %.2f, max|uo|: (%.2e, %.2e, %.2e) (m s⁻¹)",
+    msg = @sprintf("Iter: %d, time: %s, SDPD: %.1f, max|uo|: (%.2e, %.2e, %.2e) (m s⁻¹)",
                    Oceananigans.iteration(sim),
                    Oceananigans.prettytime(sim),
                    sdpd, max_uo, max_vo, max_wo)
 
-    msg *= @sprintf("\n    max|ua|: (%.2e, %.2e) (m s⁻¹), extrema(Ta): (%.1f, %.1f) K, max(qa): %.2e",
+    msg *= @sprintf(", max|ua|: (%.1e, %.1e) (m s⁻¹), extrema(Ta): (%d, %d) K, max(qa): %.1e",
                     max_ua, max_va, min_Ta, max_Ta, max_qa) 
 
-    msg *= @sprintf("\n   max(ρτo): (%.2e, %.2e) N m⁻², max(ρτa): (%.2e, %.2e) N m⁻², max(ΣQ): %.2e W m⁻²",
+    msg *= @sprintf("\n   max(ρτo): (%.2f, %.2f) N m⁻², max(ρτa): (%.2f, %.2f) N m⁻², max(ΣQ): %d W m⁻²",
                     max_ρτxo, max_ρτyo,
                     max_ρτxa, max_ρτya, max_ΣQ)
+
+    msg *= @sprintf(", max(Qc): %d W m⁻², max(Qv): %d W m⁻²",
+                    max_Qc, max_Qv)
 
     @info msg
 
@@ -167,7 +172,7 @@ function progress(sim)
     return nothing
 end
 
-Oceananigans.add_callback!(simulation, progress, Oceananigans.IterationInterval(1))
+Oceananigans.add_callback!(simulation, progress, Oceananigans.IterationInterval(10))
 
 using Oceananigans: ∂x, ∂y
 
