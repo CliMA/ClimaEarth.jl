@@ -4,21 +4,65 @@ import Oceananigans
 
 using ClimaEarth
 using Printf
-using GLMakie
+# using GLMakie
+
+# Making ClimaAtmos a little less chatty
+using Logging
+using LoggingExtras
+
+# filter_climaatmos = log_args -> log_args._module != ClimaAtmos
+# logger = EarlyFilteredLogger(filter_climaatmos, Logging.current_logger())
+# global_logger(logger)
 
 ####
 #### Atmosphere simulation
 ####
 
-atmosphere_configuration = Atmos.AtmosConfig("simple_atmos_simulation.yml")
-atmosphere = Atmos.get_simulation(atmosphere_configuration)
+# List of output variables:
+#    * ClimaAtmos:
+#    https://clima.github.io/ClimaAtmos.jl/dev/available_diagnostics/
+#    
+#    * CMIP (which ClimaAtmos attempt to comply to):
+#    https://airtable.com/appYNLuWqAgzLbhSq/shrKcLEdssxb8Yvcp/tblL7dJkC3vl5zQLb
+
+output_prefix = "aquaplanet"
+
+config_dict = Dict(
+    "device" => "CUDADevice",
+    "z_max" => 60000.0,
+    "z_elem" => 31,
+    "h_elem" => 6, # h_elem = 30 => ~ 1 degree
+    "dz_bottom" => 50.0,
+    #"dt" => "100secs",
+    "dt" => "0.00001secs",
+    "topography" => "NoWarp", # "Earth"
+    "rayleigh_sponge" => true,
+    "implicit_diffusion" => true,
+    "approximate_linear_solve_iters" => 2,
+    "moist" =>  "equil",
+    "surface_setup" => "PrescribedSurface", #DefaultMoninObukhov"
+    "vert_diff" => "DecayWithHeightDiffusion",
+    "precip_model" =>  "0M",
+    "cloud_model" =>  "grid_scale",
+    "log_progress" =>  false,
+    "output_dir" => output_prefix, 
+    "dt_save_to_sol" => "Inf",
+    "toml" => ["sphere_aquaplanet.toml"]
+)
+
+atmosphere = Atmos.AtmosSimulation(config_dict)
 Δt = atmosphere.integrator.dt # set in yml file
 
 ####
 #### A near-global ocean
 ####
 
-arch = Oceananigans.CPU()
+arch = if Atmos.ClimaComms.device(atmosphere) isa Atmos.ClimaComms.CUDADevice
+    Oceananigans.GPU()
+else
+    Oceananigans.CPU()
+end
+    
 Nx = 360
 Ny = 160
 Nz = 30
@@ -57,11 +101,8 @@ Oceananigans.set!(ocean.model, T=Tᵢ, S=Sᵢ)
 radiation  = Ocean.Radiation(ocean_albedo=0.03)
 sea_ice    = Ocean.FreezingLimitedOceanTemperature()
 model      = Ocean.OceanSeaIceModel(ocean, sea_ice; atmosphere, radiation)
-simulation = Ocean.Simulation(model; Δt, stop_time=360 * Oceananigans.Units.days)
-
-# OceanSeaIceModel interpolates the atmosphere to the ocean grid:
-heatmap(model.interfaces.near_surface_atmosphere_state.T)
-display(current_figure())
+#simulation = Ocean.Simulation(model; Δt, stop_time=360 * Oceananigans.Units.days)
+simulation = Ocean.Simulation(model; Δt, stop_iteration=10)
 
 #####
 ##### Set up some callbaks + diagnostics and run the simulation
@@ -72,26 +113,50 @@ wallclock = Ref(time_ns())
 function progress(sim)
     uo, vo, wo = sim.model.ocean.model.velocities
 
+    ua = sim.model.interfaces.exchanger.exchange_atmosphere_state.u
+    va = sim.model.interfaces.exchanger.exchange_atmosphere_state.v
+    Ta = sim.model.interfaces.exchanger.exchange_atmosphere_state.T
+    qa = sim.model.interfaces.exchanger.exchange_atmosphere_state.q
+
+    max_ua = maximum(abs, ua)
+    max_va = maximum(abs, va)
+
+    min_Ta = minimum(Ta)
+    max_Ta = maximum(Ta)
+    max_qa = maximum(qa)
+
     max_uo = maximum(abs, uo)
     max_vo = maximum(abs, vo)
     max_wo = maximum(abs, wo)
 
     ρτx = sim.model.interfaces.atmosphere_ocean_interface.fluxes.x_momentum
     ρτy = sim.model.interfaces.atmosphere_ocean_interface.fluxes.y_momentum
+    Qv = sim.model.interfaces.atmosphere_ocean_interface.fluxes.latent_heat
+    Qc = sim.model.interfaces.atmosphere_ocean_interface.fluxes.sensible_heat
+
+    max_ρτxa = maximum(atmosphere.integrator.p.precomputed.sfc_conditions.ρ_flux_uₕ.components.data.:1)
+    max_ρτya = maximum(atmosphere.integrator.p.precomputed.sfc_conditions.ρ_flux_uₕ.components.data.:2)
+
     ΣQ = sim.model.interfaces.net_fluxes.ocean_surface.Q
 
-    max_ρτx = maximum(abs, ρτx)
-    max_ρτy = maximum(abs, ρτy)
+    max_ρτxo = maximum(abs, ρτx)
+    max_ρτyo = maximum(abs, ρτy)
     max_ΣQ = maximum(abs, ΣQ)
 
     elapsed = 1e-9 * (time_ns() - wallclock[])
     sdpd = sim.Δt / elapsed
 
     msg = @sprintf("Iter: %d, time: %s, SDPD: %.2f, max|uo|: (%.2e, %.2e, %.2e) (m s⁻¹)",
-                   iteration(sim), prettytime(sim), sdpd, max_uo, max_vo, max_wo)
+                   Oceananigans.iteration(sim),
+                   Oceananigans.prettytime(sim),
+                   sdpd, max_uo, max_vo, max_wo)
 
-    msg *= @sprintf(", max(ρτ): (%.2e, %.2e) N m⁻², max(ΣQ): %.2e W m⁻²",
-                    max_ρτx, max_ρτy, max_ΣQ)
+    msg *= @sprintf("\n    max|ua|: (%.2e, %.2e) (m s⁻¹), extrema(Ta): (%.1f, %.1f) K, max(qa): %.2e",
+                    max_ua, max_va, min_Ta, max_Ta, max_qa) 
+
+    msg *= @sprintf("\n   max(ρτo): (%.2e, %.2e) N m⁻², max(ρτa): (%.2e, %.2e) N m⁻², max(ΣQ): %.2e W m⁻²",
+                    max_ρτxo, max_ρτyo,
+                    max_ρτxa, max_ρτya, max_ΣQ)
 
     @info msg
 
@@ -100,20 +165,30 @@ function progress(sim)
     return nothing
 end
 
-Oceananigans.add_callback!(simulation, progress, Oceananigans.IterationInterval(10))
+Oceananigans.add_callback!(simulation, progress, Oceananigans.IterationInterval(1))
 
 using Oceananigans: ∂x, ∂y
+
+ua = model.interfaces.exchanger.exchange_atmosphere_state.u
+va = model.interfaces.exchanger.exchange_atmosphere_state.v
+Ta = model.interfaces.exchanger.exchange_atmosphere_state.T
+qa = model.interfaces.exchanger.exchange_atmosphere_state.q
+
 uo, vo, wo = ocean.model.velocities
-T = ocean.model.tracers.T
-S = ocean.model.tracers.S
-ζ = ∂x(vo) - ∂y(uo)
-outputs = (; uo, vo, wo, ζ, T, S)
+To = ocean.model.tracers.T
+So = ocean.model.tracers.S
+ζo = ∂x(vo) - ∂y(uo)
+#ζa = ∂x(va) - ∂y(ua)
+#outputs = (; uo, vo, wo, ζo, To, So, ua, va, ζa, Ta, qa)
+outputs = (; uo, vo, wo, ζo, To, So) #, ua, va, Ta, qa)
+
 surface_writer = Oceananigans.JLD2OutputWriter(ocean.model, outputs,
-                                               schedule = IterationInterval(10),
+                                               schedule = Oceananigans.IterationInterval(10),
                                                filename = "aquaplanet_ocean.jld2",
                                                indices = (:, :, 30),
                                                overwrite_existing = true)  
+
 simulation.output_writers[:ocean] = surface_writer
 
-run!(simulation)
+Oceananigans.run!(simulation)
 

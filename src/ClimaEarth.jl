@@ -16,8 +16,10 @@ import ClimaOcean.OceanSeaIceModels.PrescribedAtmospheres:
     boundary_layer_height, 
     surface_layer_height
 
-import ClimaOcean.OceanSeaIceModels:
-    compute_net_atmopshere_fluxes!,
+import ClimaOcean.OceanSeaIceModels: compute_net_atmosphere_fluxes!
+
+import ClimaOcean.OceanSeaIceModels.InterfaceComputations:
+    atmosphere_exchanger,
     interpolate_atmosphere_state!
 
 using ClimaOcean.OceanSeaIceModels: OceanSeaIceModel
@@ -28,7 +30,12 @@ const ClimaCoupledModel = OceanSeaIceModel{<:Any, <:CA.AtmosSimulation}
 update_model_field_time_series!(::CA.AtmosSimulation, time) = nothing
 
 # Take one time-step
-time_step!(atmos::CA.AtmosSimulation) = CA.SciMLBase.step!(atmos.integrator)
+function time_step!(atmos::CA.AtmosSimulation, Δt)
+    # TODO: check if the time-step can be changed.
+    @assert Δt == atmos.integrator.dt
+    CA.SciMLBase.step!(atmos.integrator)
+    return nothing
+end
 
 # The height of near-surface variables used in the turbulent flux solver
 surface_layer_height(s::CA.AtmosSimulation) = 10 # meters, for example
@@ -61,8 +68,8 @@ function interpolate_atmosphere_state!(interfaces,
                                        atmosphere::CA.AtmosSimulation, 
                                        coupled_model)
 
-    near_surface_atmosphere_state = interfaces.near_surface_atmosphere_state
-    grid = near_surface_atmosphere_state.u.grid
+    exchange_atmosphere_state = interfaces.exchanger.exchange_atmosphere_state
+    grid = exchange_atmosphere_state.u.grid
 
     λ = λnodes(grid, Center(), Center(), Center())
     φ = φnodes(grid, Center(), Center(), Center())
@@ -83,7 +90,6 @@ function interpolate_atmosphere_state!(interfaces,
     # T, q, p from thermodynamic state ts?
     tsa = CC.Spaces.level(atmosphere.integrator.p.precomputed.ᶜts, 1)
     ℂa = atmosphere.integrator.p.params.thermodynamics_params
-    # ℂa = CA.Parameters.thermodynamics_params(atmos.integrator.p.params)
     Ta = Thermodynamics.air_temperature.(ℂa, tsa)
     pa = Thermodynamics.air_pressure.(ℂa, tsa)
     qa = Thermodynamics.total_specific_humidity.(ℂa, tsa)
@@ -92,18 +98,34 @@ function interpolate_atmosphere_state!(interfaces,
     pi = CC.Remapping.interpolate(pa, hcoords, nothing)
     qi = CC.Remapping.interpolate(qa, hcoords, nothing)
 
-    # interior(near_surface_atmosphere_state.u, :, :, 1) ?
+    # interior(exchange_atmosphere_state.u, :, :, 1) ?
     # or write a kernel and set them all.
-    near_surface_atmosphere_state.u  .= ui
-    near_surface_atmosphere_state.v  .= vi
-    near_surface_atmosphere_state.T  .= Ti
-    near_surface_atmosphere_state.q  .= qi
-    near_surface_atmosphere_state.p  .= pi
-    near_surface_atmosphere_state.Qs .= 0
-    near_surface_atmosphere_state.Qℓ .= 0
+    exchange_atmosphere_state.u  .= ui
+    exchange_atmosphere_state.v  .= vi
+    exchange_atmosphere_state.T  .= Ti
+    exchange_atmosphere_state.q  .= qi
+    exchange_atmosphere_state.p  .= pi
+    exchange_atmosphere_state.Qs .= 0
+    exchange_atmosphere_state.Qℓ .= 0
 
     return nothing
 end
+
+atmosphere_exchanger(atmosphere::CA.AtmosSimulation, exchange_grid) = nothing
+
+#=
+struct AtmosOceanExchanger{A2E, E2A}
+    atmos_to_exchange_regridder :: A2E
+    exchange_to_atmos_regridder :: E2A
+end
+
+function atmosphere_exchanger(atmosphere::CA.AtmosSimulation, exchange_grid)
+    space3 = axes(atmosphere.integrator.p.precomputed.sfc_conditions.ts)
+    space2 = CC.Spaces.SpectralElementSpace2D(space3.grid.full_grid.horizontal_grid)
+    regridder = ClimaUtilities.Regridders.InterpolationsRegridder(space2)
+
+end
+=#
 
 using ClimaUtilities
 using ClimaCore.Utilities: half
