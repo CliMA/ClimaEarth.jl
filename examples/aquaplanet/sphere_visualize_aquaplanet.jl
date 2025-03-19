@@ -23,6 +23,7 @@ end
 
 ζot = FieldTimeSeries(ocean_filename, "ζo")
 Tot = FieldTimeSeries(ocean_filename, "To")
+Tot .+= 273.15 # convert ocean SST from ᵒC to ᵒK
 uat = FieldTimeSeries(atmos_filename, "ua")
 Tat = FieldTimeSeries(atmos_filename, "Ta")
 
@@ -56,8 +57,8 @@ Colorbar(fig[2, 2], sf, width=Relative(0.6), vertical=false, label = "Atmosphere
 sf = surface!(axζo, x, y, z, color=ζon, colorrange=(-5e-5, 5e-5), colormap=:balance, nan_color=:lightgray)
 Colorbar(fig[4, 1], sf, width=Relative(0.6), vertical=false, label = "Ocean vorticity (s⁻¹)", labelsize=20)
 
-sf = surface!(axTo, x, y, z, color=Ton, colorrange=(-2, 32), colormap=:magma, nan_color=:lightgray)
-Colorbar(fig[4, 2], sf, width=Relative(0.6), vertical=false, label = "Ocean SST (ᵒC)", labelsize=20)
+sf = surface!(axTo, x, y, z, color=Ton, colorrange=(270, 305), colormap=:magma, nan_color=:lightgray)
+Colorbar(fig[4, 2], sf, width=Relative(0.6), vertical=false, label = "Ocean SST (ᵒK)", labelsize=20)
 
 t = uat.times
 title = @lift @sprintf("%1.2f days", t[$n] / Oceananigans.Units.day)
