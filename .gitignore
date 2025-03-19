@@ -28,5 +28,7 @@ Manifest.toml
 *.swp
 *.swo
 *.txt
+*.dat
 *output/
-*output/*
+*output*/*
+*output*
