@@ -2,6 +2,7 @@ import ClimaOcean as Ocean
 import ClimaAtmos as Atmos
 import Oceananigans
 import Thermodynamics
+Thermodynamics.print_warning() = false
 
 using ClimaEarth
 using Printf
@@ -17,7 +18,7 @@ config_dict = Dict(
     #"z_max" => 60000.0,
     "z_max" => 30000.0,
     "z_elem" => 31,
-    "h_elem" => 18, # h_elem = 30 => ~ 1 degree
+    "h_elem" => 30, # h_elem = 30 => ~ 1 degree
     "dz_bottom" => 50.0,
     #"dt" => "100secs",
     "dt" => "200secs",
@@ -52,9 +53,9 @@ else
     Oceananigans.CPU()
 end
     
-Nx = 360
-Ny = 170
-Nz = 30
+Nx = 2 * 360
+Ny = 2 * 170
+Nz = 10
 z_faces = Ocean.exponential_z_faces(; Nz, h=30, depth=6000)
 
 grid = Oceananigans.LatitudeLongitudeGrid(arch;
@@ -89,7 +90,8 @@ Oceananigans.set!(ocean.model, T=Tᵢ, S=Sᵢ)
 radiation  = Ocean.Radiation(ocean_albedo=0.03)
 sea_ice    = Ocean.FreezingLimitedOceanTemperature()
 model      = Ocean.OceanSeaIceModel(ocean, sea_ice; atmosphere, radiation)
-simulation = Ocean.Simulation(model; Δt, stop_time=60 * Oceananigans.Units.days)
+#simulation = Ocean.Simulation(model; Δt, stop_time=60 * Oceananigans.Units.days)
+simulation = Ocean.Simulation(model; Δt, stop_iteration=3) #stop_time=60 * Oceananigans.Units.days)
 
 #####
 ##### Set up some callbaks + diagnostics and run the simulation
