@@ -60,7 +60,7 @@ sf = surface!(axTo, x, y, z, color=Ton, colorrange=(-2, 32), colormap=:magma, na
 Colorbar(fig[4, 2], sf, width=Relative(0.6), vertical=false, label = "Ocean SST (ᵒC)", labelsize=20)
 
 t = uat.times
-title = @lift @sprintf("%s days", round((t[$n] + 1e-6) / Oceananigans.Units.day, digits=2))
+title = @lift @sprintf("%1.2f days", t[$n] / Oceananigans.Units.day)
 Label(fig[0, :], title, fontsize=24)
 
 for ax in (axua, axTa, axζo, axTo)
