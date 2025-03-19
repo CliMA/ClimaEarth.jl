@@ -2,6 +2,7 @@ import ClimaOcean as Ocean
 import ClimaAtmos as Atmos
 import Oceananigans
 import Thermodynamics
+Thermodynamics.print_warning() = false
 
 using ClimaEarth
 using Printf
@@ -40,6 +41,7 @@ config_dict = Dict(
     "dz_bottom" => 50.0,
     #"dt" => "100secs",
     "dt" => "200secs",
+    #"dt" => "400secs",
     "topography" => "NoWarp", # "Earth"
     "rayleigh_sponge" => true,
     "implicit_diffusion" => true,
@@ -94,8 +96,7 @@ ocean = Ocean.ocean_simulation(grid; momentum_advection, tracer_advection,
                                closure, free_surface)
 
 # Set up initial conditions for temperature and salinity
-Tatm(λ, φ, z=0) = 30 * cosd(φ)
-Tᵢ(λ, φ, z) = 30 * (1 - tanh((abs(φ) - 40) / 5)) / 2 + rand()
+Tᵢ(λ, φ, z) = 30 * (1 - tanh((abs(φ) - 30) / 5)) / 2 + rand()
 Sᵢ(λ, φ, z) = 30 - 5e-3 * z + rand()
 Oceananigans.set!(ocean.model, T=Tᵢ, S=Sᵢ)
 
@@ -116,24 +117,28 @@ simulation = Ocean.Simulation(model; Δt, stop_time=60 * Oceananigans.Units.days
 ##### Set up some callbaks + diagnostics and run the simulation
 #####
 
-wallclock = Ref(time_ns())
+wallclock = Ref((Oceananigans.iteration(simulation), time_ns()))
 
 function progress(sim)
     atmosphere = sim.model.atmosphere
     ocean = sim.model.ocean
     tsa = atmosphere.integrator.p.precomputed.ᶜts
-    elapsed = 1e-9 * (time_ns() - wallclock[])
-    sdpd = sim.Δt / elapsed
+    current = wallclock[]
+    elapsed = 1e-9 * (time_ns() - current[2])
+
+    n = Oceananigans.iteration(sim)
+    Nt = n - current[1]
+    sypd = Nt * sim.Δt / elapsed
     uo, vo, wo = ocean.model.velocities
 
     max_uo = maximum(abs, uo)
     max_vo = maximum(abs, vo)
     max_wo = maximum(abs, wo)
 
-    msg = @sprintf("Iter: %d, time: %s, SDPD: %.1f, max|uo|: (%.2e, %.2e, %.2e) (m s⁻¹)",
+    msg = @sprintf("Iter: %d, time: %s, SYPD: %.1f, max|uo|: (%.2e, %.2e, %.2e) (m s⁻¹)",
                    Oceananigans.iteration(sim),
                    Oceananigans.prettytime(sim),
-                   sdpd, max_uo, max_vo, max_wo)
+                   sypd, max_uo, max_vo, max_wo)
 
     ua = sim.model.interfaces.exchanger.exchange_atmosphere_state.u
     va = sim.model.interfaces.exchanger.exchange_atmosphere_state.v
@@ -188,7 +193,7 @@ function progress(sim)
 
     @info msg
 
-    wallclock[] = time_ns()
+    wallclock[] = (Oceananigans.iteration(sim), time_ns())
 
     return nothing
 end
