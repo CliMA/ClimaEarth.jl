@@ -7,26 +7,7 @@ using ClimaEarth
 using Printf
 # using GLMakie
 
-# Making ClimaAtmos a little less chatty
-using Logging
-using LoggingExtras
-
-# filter_climaatmos = log_args -> log_args._module != ClimaAtmos
-# logger = EarlyFilteredLogger(filter_climaatmos, Logging.current_logger())
-# global_logger(logger)
-
-####
-#### Atmosphere simulation
-####
-
-# List of output variables:
-#    * ClimaAtmos:
-#    https://clima.github.io/ClimaAtmos.jl/dev/available_diagnostics/
-#    
-#    * CMIP (which ClimaAtmos attempt to comply to):
-#    https://airtable.com/appYNLuWqAgzLbhSq/shrKcLEdssxb8Yvcp/tblL7dJkC3vl5zQLb
-
-output_prefix = "aquaplanet_fast"
+output_prefix = "resting_aquaplanet"
 
 # Config docs:
 # https://clima.github.io/ClimaAtmos.jl/dev/config/
@@ -46,8 +27,8 @@ config_dict = Dict(
     "approximate_linear_solve_iters" => 2,
     "moist" =>  "equil",
     "surface_setup" => "PrescribedSurface", #DefaultMoninObukhov"
-    "initial_condition" => "MoistBaroclinicWave",
-    #"initial_condition" => "DecayingIsothermalProfile",
+    #"initial_condition" => "MoistBaroclinicWave",
+    "initial_condition" => "DecayingProfile",
     #"initial_condition" => "DryBaroclinicWave",
     "vert_diff" => "DecayWithHeightDiffusion",
     "precip_model" =>  "0M",
@@ -94,9 +75,8 @@ ocean = Ocean.ocean_simulation(grid; momentum_advection, tracer_advection,
                                closure, free_surface)
 
 # Set up initial conditions for temperature and salinity
-Tatm(λ, φ, z=0) = 30 * cosd(φ)
-Tᵢ(λ, φ, z) = 30 * (1 - tanh((abs(φ) - 40) / 5)) / 2 + rand()
-Sᵢ(λ, φ, z) = 30 - 5e-3 * z + rand()
+Tᵢ(λ, φ, z) = 30 #* (1 - tanh((abs(φ) - 40) / 5)) / 2 + rand()
+Sᵢ(λ, φ, z) = 30 - 5e-3 * z #+ 1e-2 * rand()
 Oceananigans.set!(ocean.model, T=Tᵢ, S=Sᵢ)
 
 # Ocean.set!(ocean.model, T=Ocean.ECCOMetadata(:temperature),
@@ -110,7 +90,6 @@ radiation  = Ocean.Radiation(ocean_albedo=0.03)
 sea_ice    = Ocean.FreezingLimitedOceanTemperature()
 model      = Ocean.OceanSeaIceModel(ocean, sea_ice; atmosphere, radiation)
 simulation = Ocean.Simulation(model; Δt, stop_time=60 * Oceananigans.Units.days)
-#simulation = Ocean.Simulation(model; Δt, stop_iteration=100)
 
 #####
 ##### Set up some callbaks + diagnostics and run the simulation
@@ -193,7 +172,7 @@ function progress(sim)
     return nothing
 end
 
-Oceananigans.add_callback!(simulation, progress, Oceananigans.IterationInterval(100))
+Oceananigans.add_callback!(simulation, progress, Oceananigans.IterationInterval(10))
 
 using Oceananigans: ∂x, ∂y
 
