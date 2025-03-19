@@ -100,6 +100,15 @@ function interpolate_atmosphere_state!(interfaces,
     pa = Thermodynamics.air_pressure.(ℂa, tsa)
     qa = Thermodynamics.total_specific_humidity.(ℂa, tsa)
 
+    #=
+    # TODO: make this work without allocation
+    #       make sure that Remapper(args...; buffer_length=5)
+    #       or whatever it needs to be
+    exchange_fields = cat(ue, ve, Te, pe, qe, dims=3)
+    atmos_fields    = [ua, va, Ta, pa, qa]
+    CC.Remapping.interpolate!(exchange_fields, remapper, atmos_fields)
+    =#
+
     CC.Remapping.interpolate!(ue, remapper, ua)
     CC.Remapping.interpolate!(ve, remapper, va)
     CC.Remapping.interpolate!(Te, remapper, Ta)
@@ -141,12 +150,11 @@ function atmosphere_exchanger(atmosphere::CA.AtmosSimulation, exchange_grid)
 
     Xh = @. CC.Geometry.LatLongPoint(φ, λ)
     space = axes(atmosphere.integrator.u.c)
-    surface = CC.Spaces.level(space, 1)
+    first_level = CC.Spaces.level(space, 1)
 
     # Note: buffer_length gives the maximum number of variables that can be remapped
     # within a single kernel.
-    #atmos_to_exchange_remapper = CC.Remapping.Remapper(space, Xh, nothing, buffer_length=5)
-    atmos_to_exchange_remapper = CC.Remapping.Remapper(surface, Xh, nothing, buffer_length=5)
+    atmos_to_exchange_remapper = CC.Remapping.Remapper(first_level, Xh, nothing, buffer_length=1)
 
     return atmos_to_exchange_remapper
 end
