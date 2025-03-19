@@ -56,7 +56,7 @@ Colorbar(fig[2, 2], sf, width=Relative(0.6), vertical=false, label = "Atmosphere
 sf = surface!(axζo, x, y, z, color=ζon, colorrange=(-5e-5, 5e-5), colormap=:balance, nan_color=:lightgray)
 Colorbar(fig[4, 1], sf, width=Relative(0.6), vertical=false, label = "Ocean vorticity (s⁻¹)", labelsize=20)
 
-sf = surface!(axTo, x, y, z, color=Ton, colorrange=(270, 310), colormap=:magma, nan_color=:lightgray)
+sf = surface!(axTo, x, y, z, color=Ton, colorrange=(-2, 32), colormap=:magma, nan_color=:lightgray)
 Colorbar(fig[4, 2], sf, width=Relative(0.6), vertical=false, label = "Ocean SST (K)", labelsize=20)
 
 t = uat.times
@@ -72,7 +72,7 @@ rowgap!(fig.layout, 1, Relative(-0.1))
 rowgap!(fig.layout, 3, Relative(-0.1))
 
 colgap!(fig.layout, 1, Relative(-0.07))
-colgap!(fig.layout, 2, Relative(-0.07))
+# colgap!(fig.layout, 2, Relative(-0.07))
 
 fig
 
