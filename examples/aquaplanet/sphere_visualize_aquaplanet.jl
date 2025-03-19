@@ -51,13 +51,13 @@ sf = surface!(axua, x, y, z, color=uan, colorrange=(-40, 40), colormap=:balance,
 Colorbar(fig[2, 1], sf, width=Relative(0.6), vertical=false, label = "Atmosphere zonal velocity (m s⁻¹)", labelsize=20)
 
 sf = surface!(axTa, x, y, z, color=Tan, colorrange=(270, 310), colormap=:magma, nan_color=:lightgray)
-Colorbar(fig[2, 2], sf, width=Relative(0.6), vertical=false, label = "Atmosphere surface temperature (K)", labelsize=20)
+Colorbar(fig[2, 2], sf, width=Relative(0.6), vertical=false, label = "Atmosphere surface temperature (ᵒK)", labelsize=20)
 
 sf = surface!(axζo, x, y, z, color=ζon, colorrange=(-5e-5, 5e-5), colormap=:balance, nan_color=:lightgray)
 Colorbar(fig[4, 1], sf, width=Relative(0.6), vertical=false, label = "Ocean vorticity (s⁻¹)", labelsize=20)
 
 sf = surface!(axTo, x, y, z, color=Ton, colorrange=(-2, 32), colormap=:magma, nan_color=:lightgray)
-Colorbar(fig[4, 2], sf, width=Relative(0.6), vertical=false, label = "Ocean SST (K)", labelsize=20)
+Colorbar(fig[4, 2], sf, width=Relative(0.6), vertical=false, label = "Ocean SST (ᵒC)", labelsize=20)
 
 t = uat.times
 title = @lift @sprintf("%s days", round((t[$n] + 1e-6) / Oceananigans.Units.day, digits=2))
