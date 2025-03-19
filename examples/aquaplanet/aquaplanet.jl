@@ -211,7 +211,7 @@ uo, vo, wo = ocean.model.velocities
 To = ocean.model.tracers.T
 So = ocean.model.tracers.S
 ζo = ∂x(vo) - ∂y(uo)
-#ζa = ∂x(va) - ∂y(ua)
+ζa = ∂x(va) - ∂y(ua)
 #outputs = (; uo, vo, wo, ζo, To, So, ua, va, ζa, Ta, qa)
 
 outputs = (; uo, vo, wo, ζo, To, So) #, ua, va, Ta, qa)
@@ -221,7 +221,7 @@ ocean_writer = Oceananigans.JLD2Writer(ocean.model, outputs,
                                        indices = (:, :, 30),
                                        overwrite_existing = true)  
 
-outputs = (; ua, va, Ta, qa)
+outputs = (; ua, va, ζa, Ta, qa)
 atmos_writer = Oceananigans.JLD2Writer(ocean.model, outputs,
                                        schedule = Oceananigans.IterationInterval(108),
                                        filename = output_prefix * "_atmos.jld2",
