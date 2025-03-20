@@ -2,10 +2,13 @@ module ClimaEarth
 
 using OffsetArrays
 using KernelAbstractions
+using Statistics
 
 import ClimaAtmos as CA
 import ClimaOcean as CO
 import Oceananigans as OC
+
+import CUDA
 
 # This document lays out the functions that must be extended to
 # use an atmospheric simulation in ClimaOcean.
@@ -19,7 +22,8 @@ import ClimaOcean.OceanSeaIceModels.PrescribedAtmospheres:
     boundary_layer_height, 
     surface_layer_height
 
-import ClimaOcean.OceanSeaIceModels: compute_net_atmosphere_fluxes!
+import ClimaOcean.OceanSeaIceModels:
+    compute_net_atmosphere_fluxes!
 
 import ClimaOcean.OceanSeaIceModels.InterfaceComputations:
     atmosphere_exchanger,
@@ -59,8 +63,6 @@ import ClimaCore as CC
 using Oceananigans.Grids: λnodes, φnodes, LatitudeLongitudeGrid
 using Oceananigans.Fields: Center
 using Thermodynamics
-Thermodynamics.print_warning() = false
-#Thermodynamics.print_warning() = true
 
 """
     interpolate_atmospheric_state!(surface_atmosphere_state, 
@@ -75,7 +77,7 @@ function interpolate_atmosphere_state!(interfaces,
                                        atmosphere::CA.AtmosSimulation, 
                                        coupled_model)
 
-    remapper = interfaces.exchanger.atmosphere_exchanger
+    interpolator = interfaces.exchanger.atmosphere_exchanger.to_exchange_interp
     exchange_atmosphere_state = interfaces.exchanger.exchange_atmosphere_state
 
     ue  = parent(exchange_atmosphere_state.u)
@@ -94,6 +96,7 @@ function interpolate_atmosphere_state!(interfaces,
     ua = Uah.components.data.:1
     va = Uah.components.data.:2
 
+    # TODO: can we avoid allocating for Ta, pa, qa?
     tsa = CC.Spaces.level(atmosphere.integrator.p.precomputed.ᶜts, 1)
     ℂa = atmosphere.integrator.p.params.thermodynamics_params
     Ta = Thermodynamics.air_temperature.(ℂa, tsa)
@@ -109,11 +112,11 @@ function interpolate_atmosphere_state!(interfaces,
     CC.Remapping.interpolate!(exchange_fields, remapper, atmos_fields)
     =#
 
-    CC.Remapping.interpolate!(ue, remapper, ua)
-    CC.Remapping.interpolate!(ve, remapper, va)
-    CC.Remapping.interpolate!(Te, remapper, Ta)
-    CC.Remapping.interpolate!(pe, remapper, pa)
-    CC.Remapping.interpolate!(qe, remapper, qa)
+    CC.Remapping.interpolate!(ue, interpolator, ua)
+    CC.Remapping.interpolate!(ve, interpolator, va)
+    CC.Remapping.interpolate!(Te, interpolator, Ta)
+    CC.Remapping.interpolate!(pe, interpolator, pa)
+    CC.Remapping.interpolate!(qe, interpolator, qa)
 
     #=
     # This is needed, unless the above computations include the halos.
@@ -139,6 +142,13 @@ end
     end
 end
 
+#=
+mutable struct AtmosphereExchanger
+    atmosphere_to_exchange
+    exchange_to_atmos
+end
+=#
+
 function atmosphere_exchanger(atmosphere::CA.AtmosSimulation, exchange_grid)
     λ = λnodes(exchange_grid, Center(), Center(), Center(), with_halos=true)
     φ = φnodes(exchange_grid, Center(), Center(), Center(), with_halos=true)
@@ -154,9 +164,28 @@ function atmosphere_exchanger(atmosphere::CA.AtmosSimulation, exchange_grid)
 
     # Note: buffer_length gives the maximum number of variables that can be remapped
     # within a single kernel.
-    atmos_to_exchange_remapper = CC.Remapping.Remapper(first_level, Xh, nothing, buffer_length=1)
+    to_exchange_interp = CC.Remapping.Remapper(first_level, Xh, nothing, buffer_length=1)
 
-    return atmos_to_exchange_remapper
+    # Make a remapper for exchange_to_atmos regridding
+    space3 = axes(atmosphere.integrator.p.precomputed.sfc_conditions.ts)
+    space2 = CC.Spaces.SpectralElementSpace2D(space3.grid.full_grid.horizontal_grid)
+    regridder = ClimaUtilities.Regridders.InterpolationsRegridder(space2)
+    atmos_surface_points = regridder.coordinates
+
+    if exchange_grid isa OC.Grids.OrthogonalSphericalShellGrid
+        # One quick and dirty option: https://github.com/CliMA/OrthogonalSphericalShellGrids.jl/pull/29
+        error("Not supported yet!")
+    end
+
+    dummy_flux = OC.Field{OC.Center, OC.Center, Nothing}(exchange_grid)
+    Qc_a = map_interpolate(atmos_surface_points, dummy_flux)
+    Qv_a = map_interpolate(atmos_surface_points, dummy_flux)
+    Fv_a = map_interpolate(atmos_surface_points, dummy_flux)
+    ρτx_a = map_interpolate(atmos_surface_points, dummy_flux)
+    ρτy_a = map_interpolate(atmos_surface_points, dummy_flux)
+    turbulent_atmosphere_surface_fluxes = (; Qc_a, Qv_a, Fv_a, ρτx_a, ρτy_a)
+
+    return (; to_exchange_interp, turbulent_atmosphere_surface_fluxes, atmos_surface_points)
 end
 
 initialize!(::StateExchanger, ::CA.AtmosSimulation) = nothing
@@ -178,53 +207,73 @@ end
 using ClimaUtilities
 using ClimaCore.Utilities: half
 
-function compute_net_atmopshere_fluxes!(coupled_model::ClimaCoupledModel)
+@inline to_node(pt::CA.ClimaCore.Geometry.LatLongPoint) = pt.long, pt.lat
+
+instantiate(L) = L()
+
+function map_interpolate(points, oc_field::OC.Field) #, loc, grid)
+    loc = map(instantiate, OC.Fields.location(oc_field))
+    grid = oc_field.grid
+    data = oc_field.data
+
+    map(points) do pt
+        FT = eltype(pt)
+        fᵢ = OC.Fields.interpolate(to_node(pt), data, loc, grid)
+        convert(FT, fᵢ)
+    end
+end
+
+function map_interpolate!(cc_field, points, oc_field::OC.Field)
+    loc = map(instantiate, OC.Fields.location(oc_field))
+    grid = oc_field.grid
+    data = oc_field.data
+
+    map!(cc_field, points) do pt
+        FT = eltype(pt)
+        fᵢ = OC.Fields.interpolate(to_node(pt), data, loc, grid)
+        convert(FT, fᵢ)
+    end
+
+    return nothing
+end
+
+function compute_net_atmosphere_fluxes!(coupled_model::ClimaCoupledModel)
     atmosphere = coupled_model.atmosphere
     ocean = coupled_model.ocean
     ocean_grid = ocean.model.grid
     interfaces = coupled_model.interfaces
+    exchanger = interfaces.exchanger
 
-    # Regridding back to atmos
-    space3 = axes(atmosphere.integrator.p.precomputed.sfc_conditions.ts)
-    space2 = CC.Spaces.SpectralElementSpace2D(space3.grid.full_grid.horizontal_grid)
-    regridder = ClimaUtilities.Regridders.InterpolationsRegridder(space2)
+    atmos_surface_points = exchanger.atmosphere_exchanger.atmos_surface_points
+    (; Qc_a, Qv_a, Fv_a, ρτx_a, ρτy_a) = exchanger.atmosphere_exchanger.turbulent_atmosphere_surface_fluxes 
 
-    if ocean_grid isa LatitudeLongitudeGrid
-        λo = λnodes(ocean_grid, Center(), Center(), Center())
-        φo = φnodes(ocean_grid, Center(), Center(), Center())
+    Qv_e = interfaces.atmosphere_ocean_interface.fluxes.latent_heat
+    Qc_e = interfaces.atmosphere_ocean_interface.fluxes.sensible_heat
+    Fv_e = interfaces.atmosphere_ocean_interface.fluxes.water_vapor
+    ρτx_e = interfaces.atmosphere_ocean_interface.fluxes.x_momentum
+    ρτy_e = interfaces.atmosphere_ocean_interface.fluxes.y_momentum
 
-        Qv_ao = interfaces.atmosphere_ocean_interface.fluxes.latent_heat
-        Qc_ao = interfaces.atmosphere_ocean_interface.fluxes.sensible_heat
-        Fv_ao = interfaces.atmosphere_ocean_interface.fluxes.water_vapor
-        ρτx_ao = interfaces.atmosphere_ocean_interface.fluxes.x_momentum
-        ρτy_ao = interfaces.atmosphere_ocean_interface.fluxes.y_momentum
-    elseif ocean_grid isa OrthogonalSphericalShellGrid
-        # One quick and dirty option: https://github.com/CliMA/OrthogonalSphericalShellGrids.jl/pull/29
-        error("Not supported yet!")
-    end
+    map_interpolate!(Qc_a,  atmos_surface_points, Qc_e)
+    map_interpolate!(Qv_a,  atmos_surface_points, Qv_e)
+    map_interpolate!(Fv_a,  atmos_surface_points, Fv_e)
+    map_interpolate!(ρτx_a, atmos_surface_points, ρτx_e)
+    map_interpolate!(ρτy_a, atmos_surface_points, ρτy_e)
 
-    # Regrid to ClimaCore grid
-    Qv  = ClimaUtilities.Regridders.regrid(regridder, interior(Qv_ao, :, :, 1),  (λi, φi))
-    Qc  = ClimaUtilities.Regridders.regrid(regridder, interior(Qc_ao, :, :, 1),  (λi, φi))
-    Fv  = ClimaUtilities.Regridders.regrid(regridder, interior(Fv_ao, :, :, 1),  (λi, φi))
-    ρτx = ClimaUtilities.Regridders.regrid(regridder, interior(ρτx_ao, :, :, 1), (λi, φi))
-    ρτy = ClimaUtilities.Regridders.regrid(regridder, interior(ρτy_ao, :, :, 1), (λi, φi))
-
-    # Project onto a vector!
+    # Project onto a vector...
     # :eyes https://github.com/CliMA/ClimaEarth.jl/pull/5/files
-    c = atmos.integrator.p.scratch.ᶠtemp_scalar
-    𝒢 = ClimaCore.Fields.level(ClimaCore.Fields.local_geometry_field(c), half)
-    ρwh = atmos.integrator.p.precomputed.sfc_conditions.ρ_flux_h_tot
-    @. ρwh = CA.SurfaceConditions.vector_from_component(Qv, 𝒢) +
-             CA.SurfaceConditions.vector_from_component(Qc, 𝒢)
+    c = atmosphere.integrator.p.scratch.ᶠtemp_scalar
+    𝒢 = CC.Fields.level(CC.Fields.local_geometry_field(c), half)
+    ρwh = atmosphere.integrator.p.precomputed.sfc_conditions.ρ_flux_h_tot
+    @. ρwh = CA.SurfaceConditions.vector_from_component(Qv_a, 𝒢) +
+             CA.SurfaceConditions.vector_from_component(Qc_a, 𝒢)
 
     # Mass or volume flux: check units
-    ρwq = atmos.integrator.p.precomputed.sfc_conditions.ρ_flux_q_tot
-    @. ρwq = CA.SurfaceConditions.vector_from_component(Fv, 𝒢)
+    ρwq = atmosphere.integrator.p.precomputed.sfc_conditions.ρ_flux_q_tot
+    @. ρwq = CA.SurfaceConditions.vector_from_component(Fv_a, 𝒢)
     
     # TODO: validate this?
     ρτ = atmosphere.integrator.p.precomputed.sfc_conditions.ρ_flux_uₕ  
-    @. ρτ = CA.SurfaceConditions.tensor_from_components(ρτx, ρτy, 𝒢)
+    @. ρτ = CA.SurfaceConditions.tensor_from_components(ρτx_a, ρτy_a, 𝒢)
 
     return nothing
 end

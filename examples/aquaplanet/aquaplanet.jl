@@ -6,7 +6,6 @@ Thermodynamics.print_warning() = false
 
 using ClimaEarth
 using Printf
-# using GLMakie
 
 # Making ClimaAtmos a little less chatty
 using Logging
@@ -32,25 +31,19 @@ output_prefix = "aquaplanet_fast"
 # Config docs:
 # https://clima.github.io/ClimaAtmos.jl/dev/config/
 config_dict = Dict(
-    #"device" => "auto", #"CUDADevice",
-    "device" => "CUDADevice",
-    #"z_max" => 60000.0,
-    "z_max" => 30000.0,
+    "device" => "CUDADevice", # "auto"
+    "z_max" => 30000.0, # 60000.0
     "z_elem" => 31,
     "h_elem" => 18, # h_elem = 30 => ~ 1 degree
     "dz_bottom" => 50.0,
-    #"dt" => "100secs",
-    "dt" => "200secs",
-    #"dt" => "400secs",
+    "dt" => "200secs", # "100secs"
     "topography" => "NoWarp", # "Earth"
     "rayleigh_sponge" => true,
     "implicit_diffusion" => true,
     "approximate_linear_solve_iters" => 2,
     "moist" =>  "equil",
-    "surface_setup" => "PrescribedSurface", #DefaultMoninObukhov"
-    "initial_condition" => "MoistBaroclinicWave",
-    #"initial_condition" => "DecayingIsothermalProfile",
-    #"initial_condition" => "DryBaroclinicWave",
+    "surface_setup" => "PrescribedSurface",
+    "initial_condition" => "MoistBaroclinicWave", # "DecayingIsothermalProfile",
     "vert_diff" => "DecayWithHeightDiffusion",
     "precip_model" =>  "0M",
     "cloud_model" =>  "grid_scale",
@@ -85,23 +78,17 @@ grid = Oceananigans.LatitudeLongitudeGrid(arch;
                                           z = z_faces,
                                           halo = (7, 7, 7))
                   
-momentum_advection   = Oceananigans.WENOVectorInvariant()
-tracer_advection     = Oceananigans.WENO()
-free_surface         = Oceananigans.SplitExplicitFreeSurface(grid; substeps=30)
-vertical_mixing      = Oceananigans.TurbulenceClosures.CATKEVerticalDiffusivity()
-horizontal_viscosity = Oceananigans.HorizontalScalarDiffusivity(ν=2000)
-closure = vertical_mixing #(vertical_mixing, horizontal_viscosity)
+momentum_advection = Oceananigans.WENOVectorInvariant(order=5)
+tracer_advection   = Oceananigans.WENO(order=5)
+free_surface       = Oceananigans.SplitExplicitFreeSurface(grid; substeps=30)
 
 ocean = Ocean.ocean_simulation(grid; momentum_advection, tracer_advection,
-                               closure, free_surface)
+                               free_surface, warn=false)
 
 # Set up initial conditions for temperature and salinity
 Tᵢ(λ, φ, z) = 30 * (1 - tanh((abs(φ) - 30) / 5)) / 2 + rand()
 Sᵢ(λ, φ, z) = 30 - 5e-3 * z + rand()
 Oceananigans.set!(ocean.model, T=Tᵢ, S=Sᵢ)
-
-# Ocean.set!(ocean.model, T=Ocean.ECCOMetadata(:temperature),
-#                         S=Ocean.ECCOMetadata(:salinity))
 
 #####
 ##### The coupled model
@@ -110,8 +97,7 @@ Oceananigans.set!(ocean.model, T=Tᵢ, S=Sᵢ)
 radiation  = Ocean.Radiation(ocean_albedo=0.03)
 sea_ice    = Ocean.FreezingLimitedOceanTemperature()
 model      = Ocean.OceanSeaIceModel(ocean, sea_ice; atmosphere, radiation)
-simulation = Ocean.Simulation(model; Δt, stop_time=60 * Oceananigans.Units.days)
-#simulation = Ocean.Simulation(model; Δt, stop_iteration=100)
+simulation = Ocean.Simulation(model; Δt, stop_time=60*Oceananigans.Units.days)
 
 #####
 ##### Set up some callbaks + diagnostics and run the simulation
@@ -128,7 +114,7 @@ function progress(sim)
 
     n = Oceananigans.iteration(sim)
     Nt = n - current[1]
-    sypd = Nt * sim.Δt / elapsed
+    sypd = Nt * sim.Δt / elapsed / 365
     uo, vo, wo = ocean.model.velocities
 
     max_uo = maximum(abs, uo)
@@ -165,7 +151,7 @@ function progress(sim)
     min_ρa, max_ρa = minimum(ρa), maximum(ρa)
     min_pa, max_pa = minimum(pa), maximum(pa)
 
-    msg *= @sprintf("\n   extrema(pa): (%d, %d) Pa, extrema(ρa): (%.6f, %.6f) kg m⁻³",
+    msg *= @sprintf(", extrema(pa): (%d, %d) Pa, extrema(ρa): (%.6f, %.6f) kg m⁻³",
                     min_pa, max_pa, min_ρa, max_ρa)
 
     ρτx = sim.model.interfaces.atmosphere_ocean_interface.fluxes.x_momentum
@@ -173,8 +159,12 @@ function progress(sim)
     Qv = sim.model.interfaces.atmosphere_ocean_interface.fluxes.latent_heat
     Qc = sim.model.interfaces.atmosphere_ocean_interface.fluxes.sensible_heat
 
-    max_ρτxa = maximum(abs, atmosphere.integrator.p.precomputed.sfc_conditions.ρ_flux_uₕ.components.data.:1)
-    max_ρτya = maximum(abs, atmosphere.integrator.p.precomputed.sfc_conditions.ρ_flux_uₕ.components.data.:2)
+    max_ρτa = maximum(abs, atmosphere.integrator.p.precomputed.sfc_conditions.ρ_flux_uₕ)
+    max_ρwh = maximum(abs, atmosphere.integrator.p.precomputed.sfc_conditions.ρ_flux_h_tot)[]
+    max_ρwq = maximum(abs, atmosphere.integrator.p.precomputed.sfc_conditions.ρ_flux_q_tot)[]
+
+    max_ρτxa = max_ρτa[1]
+    max_ρτya = max_ρτa[2]
 
     ΣQ = sim.model.interfaces.net_fluxes.ocean_surface.Q
 
@@ -188,8 +178,9 @@ function progress(sim)
                     max_ρτxo, max_ρτyo,
                     max_ρτxa, max_ρτya, max_ΣQ)
 
-    msg *= @sprintf(", max(Qc): %d W m⁻², max(Qv): %d W m⁻²",
-                    max_Qc, max_Qv)
+
+    msg *= @sprintf(", max(Qc): %d W m⁻², max(Qv): %d W m⁻², max(ρwh_a): %d W m⁻², max(ρwq_a): %.2e",
+                    max_Qc, max_Qv, max_ρwh, max_ρwq)
 
     @info msg
 
@@ -198,7 +189,7 @@ function progress(sim)
     return nothing
 end
 
-Oceananigans.add_callback!(simulation, progress, Oceananigans.IterationInterval(100))
+Oceananigans.add_callback!(simulation, progress, Oceananigans.IterationInterval(1))
 
 using Oceananigans: ∂x, ∂y
 
@@ -211,7 +202,7 @@ uo, vo, wo = ocean.model.velocities
 To = ocean.model.tracers.T
 So = ocean.model.tracers.S
 ζo = ∂x(vo) - ∂y(uo)
-ζa = ∂x(va) - ∂y(ua)
+#ζa = ∂x(va) - ∂y(ua)
 #outputs = (; uo, vo, wo, ζo, To, So, ua, va, ζa, Ta, qa)
 
 outputs = (; uo, vo, wo, ζo, To, So) #, ua, va, Ta, qa)
@@ -221,7 +212,8 @@ ocean_writer = Oceananigans.JLD2Writer(ocean.model, outputs,
                                        indices = (:, :, 30),
                                        overwrite_existing = true)  
 
-outputs = (; ua, va, ζa, Ta, qa)
+#outputs = (; ua, va, ζa, Ta, qa)
+outputs = (; ua, va, Ta, qa)
 atmos_writer = Oceananigans.JLD2Writer(ocean.model, outputs,
                                        schedule = Oceananigans.IterationInterval(108),
                                        filename = output_prefix * "_atmos.jld2",
