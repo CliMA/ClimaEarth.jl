@@ -5,6 +5,8 @@ using KernelAbstractions
 using Statistics
 
 import ClimaAtmos as CA
+import ClimaCore as CC
+import ClimaCore.Geometry: ⊗
 import ClimaOcean as CO
 import Oceananigans as OC
 
@@ -33,6 +35,11 @@ import ClimaOcean.OceanSeaIceModels.InterfaceComputations:
 
 using ClimaOcean.OceanSeaIceModels: OceanSeaIceModel
 
+function tensor_from_uv_components(f₁₃, f₂₃, L, n₃ = CA.SurfaceConditions.surface_normal(L))
+    f = CA.C12(CC.Geometry.UVVector(f₁₃, f₂₃), L)
+    return n₃ ⊗ f
+end
+
 const ClimaCoupledModel = OceanSeaIceModel{<:Any, <:CA.AtmosSimulation}
 
 # This can be left blank:
@@ -59,7 +66,6 @@ thermodynamics_parameters(atmos::CA.AtmosSimulation) =
 
 Base.summary(::CA.AtmosSimulation) = "ClimaAtmos.AtmosSimulation"
 
-import ClimaCore as CC
 using Oceananigans.Grids: λnodes, φnodes, LatitudeLongitudeGrid
 using Oceananigans.Fields: Center
 using Thermodynamics
@@ -273,7 +279,7 @@ function compute_net_atmosphere_fluxes!(coupled_model::ClimaCoupledModel)
     
     # TODO: validate this?
     ρτ = atmosphere.integrator.p.precomputed.sfc_conditions.ρ_flux_uₕ  
-    @. ρτ = CA.SurfaceConditions.tensor_from_components(ρτx_a, ρτy_a, 𝒢)
+    @. ρτ = tensor_from_uv_components(ρτx_a, ρτy_a, 𝒢)
 
     return nothing
 end

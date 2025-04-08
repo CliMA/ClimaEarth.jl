@@ -31,10 +31,10 @@ output_prefix = "aquaplanet_fast"
 # Config docs:
 # https://clima.github.io/ClimaAtmos.jl/dev/config/
 config_dict = Dict(
-    "device" => "CUDADevice", # "auto"
+    "device" => "auto", # "auto"
     "z_max" => 30000.0, # 60000.0
     "z_elem" => 31,
-    "h_elem" => 18, # h_elem = 30 => ~ 1 degree
+    "h_elem" => 6, # h_elem = 30 => ~ 1 degree
     "dz_bottom" => 50.0,
     "dt" => "200secs", # "100secs"
     "topography" => "NoWarp", # "Earth"
@@ -66,9 +66,9 @@ else
     Oceananigans.CPU()
 end
     
-Nx = 360
-Ny = 170
-Nz = 30
+Nx = 90
+Ny = 45
+Nz = 15
 z_faces = Ocean.exponential_z_faces(; Nz, h=30, depth=6000)
 
 grid = Oceananigans.LatitudeLongitudeGrid(arch;
@@ -159,12 +159,12 @@ function progress(sim)
     Qv = sim.model.interfaces.atmosphere_ocean_interface.fluxes.latent_heat
     Qc = sim.model.interfaces.atmosphere_ocean_interface.fluxes.sensible_heat
 
-    max_ρτa = maximum(abs, atmosphere.integrator.p.precomputed.sfc_conditions.ρ_flux_uₕ)
-    max_ρwh = maximum(abs, atmosphere.integrator.p.precomputed.sfc_conditions.ρ_flux_h_tot)[]
-    max_ρwq = maximum(abs, atmosphere.integrator.p.precomputed.sfc_conditions.ρ_flux_q_tot)[]
+    max_ρτa = 0#maximum(abs, atmosphere.integrator.p.precomputed.sfc_conditions.ρ_flux_uₕ)
+    max_ρwh = 0#maximum(abs, atmosphere.integrator.p.precomputed.sfc_conditions.ρ_flux_h_tot)[]
+    max_ρwq = 0#maximum(abs, atmosphere.integrator.p.precomputed.sfc_conditions.ρ_flux_q_tot)[]
 
-    max_ρτxa = max_ρτa[1]
-    max_ρτya = max_ρτa[2]
+    max_ρτxa = 0#max_ρτa[1]
+    max_ρτya = 0#max_ρτa[2]
 
     ΣQ = sim.model.interfaces.net_fluxes.ocean_surface.Q
 
@@ -209,7 +209,7 @@ outputs = (; uo, vo, wo, ζo, To, So) #, ua, va, Ta, qa)
 ocean_writer = Oceananigans.JLD2Writer(ocean.model, outputs,
                                        schedule = Oceananigans.IterationInterval(108),
                                        filename = output_prefix * "_ocean.jld2",
-                                       indices = (:, :, 30),
+                                       indices = (:, :, ocean.model.grid.Nz),
                                        overwrite_existing = true)  
 
 #outputs = (; ua, va, ζa, Ta, qa)
